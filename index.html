@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<!--
+  VARDHAAN APPAREL — working prototype, not just a visual mockup.
+
+  Data layer right now: everything (cart, orders, inventory, customers) is
+  saved to the browser's localStorage on this device, so it persists between
+  visits and reloads — this is what makes it "actually work" for a demo.
+  It is NOT a shared server: two different phones will each have their own
+  local copy of the data.
+
+  For a real launch, localStorage would be swapped for a proper backend
+  (e.g. a small Node/Express or Firebase service with a database) so that
+  orders, stock, and customers are shared across every device and every
+  staff member. The screens, flows, and UI would stay exactly the same —
+  only the storage functions (loadState/saveState below) would change.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Vardhaan Apparel — App Prototype</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#15181F">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#15181F;
+    --ink-soft:#232733;
+    --canvas:#EAE3D3;
+    --canvas-soft:#F4EFE4;
+    --paper:#FBF8F1;
+    --gold:#C79A3E;
+    --gold-soft:#E4CE9A;
+    --teal:#1F6F63;
+    --teal-soft:#DCEAE7;
+    --rust:#B23A2E;
+    --text:#201C16;
+    --muted:#8A8171;
+    --line: rgba(32,28,22,0.14);
+    --radius: 18px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html, body{ height:100%; }
+  body{
+    background: var(--canvas-soft);
+    font-family:'Space Grotesk', sans-serif;
+    color:var(--text);
+  }
+  .phone{
+    width:100%; height:100vh; height:100dvh;
+    background:var(--canvas-soft);
+    overflow:hidden;
+    position:relative;
+    display:flex; flex-direction:column;
+  }
+  .app-header{
+    padding:calc(20px + env(safe-area-inset-top)) 18px 12px; display:flex; align-items:center; justify-content:space-between;
+    background:var(--canvas-soft); border-bottom:1px dashed var(--line);
+  }
+  .brand{ font-family:'Fraunces', serif; font-weight:700; font-size:17px; letter-spacing:.02em; }
+  .brand span{ color:var(--gold); }
+  .view-toggle{
+    font-family:'JetBrains Mono', monospace; font-size:10.5px; letter-spacing:.05em;
+    background:var(--ink); color:var(--paper); border:none; border-radius:100px;
+    padding:7px 12px; cursor:pointer; text-transform:uppercase;
+    transition: background .2s;
+  }
+  .view-toggle.seller{ background:var(--teal); }
+  main{
+    flex:1; overflow-y:auto; padding:16px 16px 90px;
+    animation: fade .25s ease;
+  }
+  @keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  @media (prefers-reduced-motion: reduce){ main{animation:none;} }
+
+  /* ---- shared bits ---- */
+  .eyebrow{ font-family:'JetBrains Mono', monospace; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  h1.page-title{ font-family:'Fraunces', serif; font-size:26px; font-weight:600; margin-top:2px; }
+  .stitch-divider{
+    height:1px; margin:16px 0;
+    background-image: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 12px);
+  }
+  .chip-row{ display:flex; gap:8px; overflow-x:auto; padding:14px 0 4px; }
+  .chip{
+    flex:0 0 auto; padding:7px 14px; border-radius:100px; font-size:12.5px;
+    background:var(--paper); border:1px solid var(--line); cursor:pointer; white-space:nowrap;
+  }
+  .chip.active{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
+  .search{
+    display:flex; align-items:center; gap:8px; background:var(--paper);
+    border:1px solid var(--line); border-radius:100px; padding:10px 14px; margin-top:14px;
+  }
+  .search input{ border:none; background:transparent; outline:none; font-size:13px; flex:1; font-family:'Space Grotesk',sans-serif; }
+
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px; }
+  .card{
+    background:var(--paper); border-radius:14px; overflow:hidden;
+    border:1px solid var(--line); cursor:pointer;
+    transition: transform .15s;
+  }
+  .card:active{ transform:scale(.97); }
+  .card-art{
+    height:120px; display:flex; align-items:center; justify-content:center;
+    position:relative; border-bottom:1px dashed var(--line);
+  }
+  .card-body{ padding:10px 11px 12px; }
+  .card-title{ font-size:12.5px; font-weight:600; line-height:1.3; }
+  .card-meta{ font-family:'JetBrains Mono', monospace; font-size:10.5px; color:var(--muted); margin-top:4px; }
+  .card-price{ font-family:'JetBrains Mono', monospace; font-size:13px; margin-top:6px; font-weight:500; }
+
+  .banner{
+    margin-top:16px; border-radius:16px; padding:18px;
+    background: linear-gradient(135deg, var(--ink) 0%, #2b3040 100%);
+    color:var(--paper); position:relative; overflow:hidden;
+  }
+  .banner::after{
+    content:""; position:absolute; inset:0;
+    background-image: repeating-linear-gradient(45deg, rgba(199,154,62,0.08) 0 2px, transparent 2px 14px);
+  }
+  .banner h3{ font-family:'Fraunces', serif; font-size:18px; font-weight:600; position:relative; }
+  .banner p{ font-size:12px; color:rgba(251,248,241,0.7); margin-top:4px; position:relative; }
+  .btn{
+    display:inline-block; margin-top:12px; background:var(--gold); color:var(--ink);
+    border:none; padding:9px 16px; border-radius:100px; font-weight:600; font-size:12.5px;
+    cursor:pointer; position:relative; font-family:'Space Grotesk',sans-serif;
+  }
+  .btn-block{ display:block; width:100%; text-align:center; margin-top:18px; padding:13px; font-size:13.5px; }
+  .btn-ghost{ background:transparent; border:1px solid var(--ink); color:var(--ink); }
+
+  /* garment svg */
+  .garment-shape{ width:76px; height:76px; }
+
+  /* ---- design studio ---- */
+  .studio-preview{
+    background:var(--ink); border-radius:16px; height:230px;
+    display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden;
+  }
+  .studio-preview .garment-shape{ width:170px; height:170px; }
+  .price-tag{
+    position:absolute; top:10px; right:10px; background:var(--gold); color:var(--ink);
+    font-family:'JetBrains Mono',monospace; font-size:12px; padding:5px 10px; border-radius:100px; font-weight:600;
+  }
+  .section-label{ font-size:11.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:16px 0 8px; }
+  .swatch-row{ display:flex; gap:10px; flex-wrap:wrap; }
+  .swatch{
+    width:30px; height:30px; border-radius:50%; cursor:pointer; border:2px solid transparent;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1);
+  }
+  .swatch.active{ border-color:var(--ink); transform:scale(1.1); }
+  .technique-row{ display:flex; gap:8px; }
+  .technique{
+    flex:1; text-align:center; padding:11px 6px; border-radius:12px; border:1px solid var(--line);
+    background:var(--paper); cursor:pointer; font-size:11.5px; font-weight:600;
+  }
+  .technique.active{ background:var(--teal); color:var(--paper); border-color:var(--teal); }
+  .size-row{ display:flex; gap:8px; }
+  .size-pill{
+    width:38px; height:38px; border-radius:50%; border:1px solid var(--line); background:var(--paper);
+    display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; cursor:pointer;
+  }
+  .size-pill.active{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
+  .upload-box{
+    border:1.5px dashed var(--muted); border-radius:14px; padding:16px; text-align:center;
+    margin-top:8px; cursor:pointer; font-size:12px; color:var(--muted); background:var(--paper);
+  }
+  .upload-box input{ display:none; }
+
+  /* cart */
+  .cart-item{ display:flex; gap:12px; padding:12px 0; border-bottom:1px dashed var(--line); align-items:center; }
+  .cart-thumb{ width:56px; height:56px; border-radius:10px; background:var(--ink); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+  .cart-info{ flex:1; }
+  .cart-name{ font-size:12.5px; font-weight:600; }
+  .cart-sub{ font-family:'JetBrains Mono', monospace; font-size:10.5px; color:var(--muted); margin-top:2px; }
+  .row-between{ display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:6px 0; }
+  .row-between.total{ font-weight:700; font-size:15px; border-top:1px solid var(--line); margin-top:8px; padding-top:12px; }
+  .field{ margin-top:10px; }
+  .field label{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .field input, .field textarea{
+    width:100%; margin-top:5px; padding:11px 12px; border-radius:10px; border:1px solid var(--line);
+    background:var(--paper); font-family:'Space Grotesk',sans-serif; font-size:13px; outline:none;
+  }
+  .pay-option{
+    display:flex; align-items:center; gap:10px; padding:12px; border:1px solid var(--line); border-radius:12px;
+    margin-top:8px; cursor:pointer; font-size:13px;
+  }
+  .pay-option.active{ border-color:var(--teal); background:var(--teal-soft); }
+
+  /* orders / stitch tracker */
+  .order-card{ background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:14px; margin-top:12px; cursor:pointer; }
+  .order-card-top{ display:flex; justify-content:space-between; align-items:baseline; }
+  .order-id{ font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--muted); }
+  .status-badge{ font-size:10.5px; padding:4px 10px; border-radius:100px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+  .status-badge.progress{ background:var(--gold-soft); color:#7A5A17; }
+  .status-badge.delivered{ background:var(--teal-soft); color:var(--teal); }
+  .tracker{ margin-top:18px; }
+  .stitch-track{
+    position:relative; height:2px;
+    background-image: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 11px);
+    margin: 22px 6px;
+  }
+  .stitch-fill{
+    position:absolute; top:0; left:0; height:2px;
+    background-image: repeating-linear-gradient(90deg, var(--teal) 0 6px, transparent 6px 11px);
+  }
+  .stitch-points{ display:flex; justify-content:space-between; margin-top:-32px; position:relative; }
+  .stitch-point{ text-align:center; width:60px; margin-left:-24px; }
+  .stitch-point:first-child{ margin-left:-6px; }
+  .stitch-dot{ width:14px; height:14px; border-radius:50%; background:var(--paper); border:2px solid var(--line); margin:0 auto; }
+  .stitch-dot.done{ background:var(--teal); border-color:var(--teal); }
+  .stitch-point-label{ font-size:9px; margin-top:6px; color:var(--muted); line-height:1.2; }
+
+  /* dashboard */
+  .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+  .stat-card{ background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:13px; }
+  .stat-num{ font-family:'Fraunces', serif; font-size:22px; font-weight:600; }
+  .stat-label{ font-size:10.5px; color:var(--muted); margin-top:2px; text-transform:uppercase; letter-spacing:.04em; }
+  .bar-chart{ margin-top:10px; display:flex; align-items:flex-end; gap:10px; height:110px; padding:0 4px; }
+  .bar-col{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; }
+  .bar{ width:100%; border-radius:6px 6px 0 0; background:var(--teal); }
+  .bar-col-label{ font-size:9.5px; color:var(--muted); margin-top:6px; }
+  table.mini{ width:100%; border-collapse:collapse; margin-top:10px; font-size:11.5px; }
+  table.mini th{ text-align:left; font-size:10px; text-transform:uppercase; color:var(--muted); font-weight:600; padding-bottom:6px; border-bottom:1px solid var(--line); }
+  table.mini td{ padding:8px 4px; border-bottom:1px dashed var(--line); }
+
+  /* tabbar */
+  .tabbar{
+    position:absolute; bottom:0; left:0; right:0; background:var(--paper);
+    border-top:1px solid var(--line); display:flex;
+    padding:8px 6px calc(14px + env(safe-area-inset-bottom));
+  }
+  .tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    background:none; border:none; cursor:pointer; padding:6px 2px; color:var(--muted); position:relative;
+  }
+  .tab.active{ color:var(--ink); }
+  .tab svg{ width:20px; height:20px; }
+  .tab-label{ font-size:9.5px; font-weight:600; }
+  .badge{
+    position:absolute; top:0; right:14px; background:var(--rust); color:#fff; font-size:9px;
+    width:15px; height:15px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700;
+  }
+  .empty{ text-align:center; padding:40px 10px; color:var(--muted); font-size:13px; }
+  .toast{
+    position:absolute; bottom:96px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:var(--paper); padding:10px 18px; border-radius:100px; font-size:12.5px;
+    opacity:0; transition:all .25s; pointer-events:none; z-index:60; white-space:nowrap;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <div class="phone">
+    <header class="app-header">
+      <div class="brand">VARDHAAN<span>·</span>APPAREL</div>
+      <button class="view-toggle" id="viewToggle">🧵 Customer view</button>
+    </header>
+    <main id="screen"></main>
+    <nav class="tabbar" id="tabbar"></nav>
+    <div class="toast" id="toast"></div>
+  </div>
+
+<script>
+/* ---------------- state (persisted to localStorage — this is the app's "backend" for now) ---------------- */
+const STORAGE_KEY = 'vardhaan_apparel_state_v1';
+
+function defaultState(){
+  return {
+    view: 'customer', // customer | seller
+    tab: 'home',
+    category: 'All',
+    cart: [],
+    design: { garment:'tee', technique:'DTF', color:'#1F6F63', size:'M', artwork:null, qty:1 },
+    orders: [
+      { id:'VA-1042', item:'Custom DTF Tee · Navy · M', status:'progress', stage:2, total:449, placed:'2 days ago', technique:'DTF' },
+      { id:'VA-1039', item:'School Uniform Set · Embroidery Logo · S', status:'progress', stage:3, total:1290, placed:'4 days ago', technique:'Embroidery' },
+      { id:'VA-1021', item:'Hoodie · Screen Print · L', status:'delivered', stage:4, total:899, placed:'2 weeks ago', technique:'Screen' },
+    ],
+    address: { name:'', phone:'', line:'' },
+    payment: 'UPI',
+    inventory: [
+      { name:'White Cotton Fabric (m)', qty:184, low:40 },
+      { name:'DTF Film Rolls', qty:4, low:5 },
+      { name:'Embroidery Thread — Gold', qty:12, low:6 },
+      { name:'Uniform Buttons (set)', qty:9, low:10 },
+      { name:'Hoodie Blanks — L', qty:22, low:8 },
+    ],
+    customers: [
+      { name:'R. Chauhan School', orders:14, spend:18200 },
+      { name:'Meera D.', orders:3, spend:1940 },
+      { name:'Sunrise Academy', orders:9, spend:11050 },
+      { name:'Parth S.', orders:1, spend:399 },
+    ],
+  };
+}
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return defaultState();
+    const saved = JSON.parse(raw);
+    return Object.assign(defaultState(), saved);
+  }catch(e){
+    return defaultState();
+  }
+}
+
+function saveState(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  catch(e){ /* storage unavailable — app still works, just won't remember between visits */ }
+}
+
+const state = loadState();
+
+const products = [
+  { id:1, name:'School Uniform Shirt', cat:'Uniforms', price:349, color:'#1F6F63', tag:'Bulk order ready' },
+  { id:2, name:'Custom DTF Tee', cat:'DTF Tees', price:399, color:'#B23A2E', tag:'Your design, printed' },
+  { id:3, name:'Embroidered Blazer', cat:'Embroidery', price:1450, color:'#15181F', tag:'Logo + name tag' },
+  { id:4, name:'Sports House Tee', cat:'Uniforms', price:299, color:'#C79A3E', tag:'Team colours' },
+  { id:5, name:'Oversized Hoodie', cat:'DTF Tees', price:899, color:'#232733', tag:'Full-back print' },
+  { id:6, name:'Monogram Cap', cat:'Embroidery', price:249, color:'#1F6F63', tag:'3D puff embroidery' },
+  { id:7, name:'Hand Embroidery Wall Art', cat:'Embroidery Art', price:1650, color:'#7A8FA6', tag:'Framed thread painting' },
+  { id:8, name:'Zardozi Cushion Cover', cat:'Embroidery Art', price:620, color:'#C79A3E', tag:'Hand-stitched motif' },
+  { id:9, name:'Photo-Realistic Print Tee', cat:'Detail Printing', price:499, color:'#15181F', tag:'HD portrait / photo print' },
+  { id:10, name:'Fine-Line Sketch Hoodie', cat:'Detail Printing', price:949, color:'#232733', tag:'Intricate line art' },
+  { id:11, name:'Ready Graphic Tee', cat:'Ready Prints', price:329, color:'#B23A2E', tag:'In stock, ships today' },
+  { id:12, name:'Ready Typography Tee', cat:'Ready Prints', price:299, color:'#1F6F63', tag:'In stock, ships today' },
+  { id:13, name:'Kurta Set', cat:'Dresses', price:1190, color:'#C79A3E', tag:'Ethnic wear' },
+  { id:14, name:'Anarkali Dress', cat:'Dresses', price:1550, color:'#B23A2E', tag:'Festive wear' },
+  { id:15, name:'Tote Bag', cat:'Accessories', price:279, color:'#7A8FA6', tag:'Custom print or embroidery' },
+  { id:16, name:'Embroidered Muffler', cat:'Accessories', price:349, color:'#232733', tag:'Winter accessory' },
+];
+
+const categories = ['All','Uniforms','DTF Tees','Embroidery','Embroidery Art','Detail Printing','Ready Prints','Dresses','Accessories'];
+
+/* ---------------- icons ---------------- */
+const ICONS = {
+  home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-9"/></svg>`,
+  design: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/><path d="m20 4-14 16M14 4l6 6"/></svg>`,
+  cart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/><path d="M2.5 3h2l2.2 11.4a2 2 0 0 0 2 1.6h7.6a2 2 0 0 0 2-1.6L20 7.5H6"/></svg>`,
+  orders: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3.5 8 12 3.5 20.5 8v8L12 20.5 3.5 16Z"/><path d="M3.5 8 12 12.5 20.5 8M12 12.5V20.5"/></svg>`,
+  profile: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 4-5.2 7-5.2s5.8 1.7 7 5.2"/></svg>`,
+  dashboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>`,
+  inventory: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3.5 7 12 3l8.5 4v10L12 21l-8.5-4Z"/><path d="M3.5 7 12 11l8.5-4M12 11v10"/></svg>`,
+  customers: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M2.5 19c1-3 3.3-4.5 6.5-4.5s5.5 1.5 6.5 4.5"/><circle cx="17.5" cy="8.5" r="2.3"/><path d="M15.8 14.7c2.3.2 4 1.7 4.8 4.3"/></svg>`,
+};
+
+function shirtSvg(color, art){
+  return `<svg class="garment-shape" viewBox="0 0 100 100">
+    <path d="M30 8 L14 20 L20 34 L28 29 L28 90 L72 90 L72 29 L80 34 L86 20 L70 8 Q65 16 50 16 Q35 16 30 8 Z"
+      fill="${color}" stroke="rgba(0,0,0,0.25)" stroke-width="1.2"/>
+    ${art ? `<clipPath id="chest"><rect x="38" y="34" width="24" height="24" rx="2"/></clipPath>
+      <image href="${art}" x="38" y="34" width="24" height="24" clip-path="url(#chest)" preserveAspectRatio="xMidYMid slice"/>
+      <rect x="38" y="34" width="24" height="24" rx="2" fill="none" stroke="#fff" stroke-width="1" stroke-dasharray="2 2"/>` : ''}
+  </svg>`;
+}
+
+/* ---------------- render ---------------- */
+const screenEl = document.getElementById('screen');
+const tabbarEl = document.getElementById('tabbar');
+const toastEl = document.getElementById('toast');
+
+function toast(msg){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  setTimeout(()=> toastEl.classList.remove('show'), 1800);
+}
+
+function cartCount(){ return state.cart.reduce((n,i)=>n+i.qty,0); }
+
+function setTabs(){
+  const customerTabs = [
+    ['home','Home','home'], ['design','Design','design'], ['cart','Cart','cart'],
+    ['orders','Orders','orders'], ['profile','Profile','profile'],
+  ];
+  const sellerTabs = [
+    ['dashboard','Dashboard','dashboard'], ['inventory','Inventory','inventory'],
+    ['orders','Orders','orders'], ['customers','Customers','customers'], ['profile','Profile','profile'],
+  ];
+  const tabs = state.view === 'customer' ? customerTabs : sellerTabs;
+  if(!tabs.find(t=>t[0]===state.tab)) state.tab = tabs[0][0];
+  tabbarEl.innerHTML = tabs.map(([key,label,icon])=>`
+    <button class="tab ${state.tab===key?'active':''}" data-tab="${key}">
+      ${ICONS[icon]}
+      <span class="tab-label">${label}</span>
+      ${key==='cart' && cartCount()>0 ? `<span class="badge">${cartCount()}</span>`:''}
+    </button>`).join('');
+  tabbarEl.querySelectorAll('.tab').forEach(b=> b.onclick = ()=>{ state.tab=b.dataset.tab; render(); });
+}
+
+function render(){
+  saveState();
+  setTabs();
+  const r = state.view==='customer' ? renderCustomer : renderSeller;
+  screenEl.innerHTML = r();
+  wireScreen();
+}
+
+/* ---------- customer screens ---------- */
+function renderCustomer(){
+  if(state.tab==='home') return screenHome();
+  if(state.tab==='design') return screenDesign();
+  if(state.tab==='cart') return screenCart();
+  if(state.tab==='orders') return screenOrders();
+  if(state.tab==='profile') return screenProfile();
+}
+function renderSeller(){
+  if(state.tab==='dashboard') return screenDashboard();
+  if(state.tab==='inventory') return screenInventory();
+  if(state.tab==='orders') return screenSellerOrders();
+  if(state.tab==='customers') return screenCustomers();
+  if(state.tab==='profile') return screenProfile();
+}
+
+function screenHome(){
+  const list = products.filter(p=> state.category==='All' || p.cat===state.category);
+  return `
+    <div class="eyebrow">Junagadh · Custom apparel</div>
+    <h1 class="page-title">Fabric to<br>finished design.</h1>
+    <div class="search">🔍 <input placeholder="Search uniforms, tees, embroidery"/></div>
+    <div class="chip-row">
+      ${categories.map(c=>`<div class="chip ${state.category===c?'active':''}" data-cat="${c}">${c}</div>`).join('')}
+    </div>
+    <div class="banner">
+      <h3>Design your own tee</h3>
+      <p>Upload artwork, pick DTF or embroidery, see it live before you order.</p>
+      <button class="btn" data-goto="design">Open Design Studio →</button>
+    </div>
+    <div class="section-label">Catalog</div>
+    <div class="grid">
+      ${list.map(p=>`
+        <div class="card" data-addcart="${p.id}">
+          <div class="card-art" style="background:${p.color}18">${shirtSvg(p.color)}</div>
+          <div class="card-body">
+            <div class="card-title">${p.name}</div>
+            <div class="card-meta">${p.tag}</div>
+            <div class="card-price">₹${p.price}</div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function screenDesign(){
+  const d = state.design;
+  const colors = ['#1F6F63','#15181F','#B23A2E','#C79A3E','#EAE3D3','#7A8FA6'];
+  const price = { DTF:120, Embroidery:220, Screen:90, Detail:280 }[d.technique] + {tee:250,hoodie:650,uniform:300}[d.garment];
+  return `
+    <div class="eyebrow">Design Studio</div>
+    <h1 class="page-title">Build the print.</h1>
+    <div class="studio-preview">
+      <div class="price-tag">₹${price}</div>
+      ${shirtSvg(d.color, d.artwork)}
+    </div>
+    <div class="section-label">Garment</div>
+    <div class="technique-row">
+      ${['tee','hoodie','uniform'].map(g=>`<div class="technique ${d.garment===g?'active':''}" data-garment="${g}">${g==='tee'?'T-Shirt':g==='hoodie'?'Hoodie':'Uniform'}</div>`).join('')}
+    </div>
+    <div class="section-label">Technique</div>
+    <div class="technique-row">
+      ${['DTF','Embroidery','Screen','Detail'].map(t=>`<div class="technique ${d.technique===t?'active':''}" data-technique="${t}">${t==='Detail'?'Detail Print':t}</div>`).join('')}
+    </div>
+    <div class="section-label">Colour</div>
+    <div class="swatch-row">
+      ${colors.map(c=>`<div class="swatch ${d.color===c?'active':''}" style="background:${c}" data-color="${c}"></div>`).join('')}
+    </div>
+    <div class="section-label">Size</div>
+    <div class="size-row">
+      ${['S','M','L','XL'].map(s=>`<div class="size-pill ${d.size===s?'active':''}" data-size="${s}">${s}</div>`).join('')}
+    </div>
+    <div class="section-label">Artwork</div>
+    <label class="upload-box">
+      ${d.artwork ? 'Artwork added — tap to replace' : '⭱ Tap to upload your logo / design (PNG or JPG)'}
+      <input type="file" id="artInput" accept="image/*"/>
+    </label>
+    <button class="btn btn-block" id="addDesignToCart">Add to cart — ₹${price}</button>`;
+}
+
+function screenCart(){
+  if(state.cart.length===0){
+    return `<div class="eyebrow">Cart</div><h1 class="page-title">Your bag</h1>
+      <div class="empty">Nothing here yet.<br>Add a product or a custom design.</div>`;
+  }
+  const subtotal = state.cart.reduce((s,i)=> s+i.price*i.qty, 0);
+  const delivery = subtotal > 999 ? 0 : 60;
+  return `
+    <div class="eyebrow">Cart</div>
+    <h1 class="page-title">Your bag</h1>
+    ${state.cart.map((i,idx)=>`
+      <div class="cart-item">
+        <div class="cart-thumb">${shirtSvg(i.color, i.artwork)}</div>
+        <div class="cart-info">
+          <div class="cart-name">${i.name}</div>
+          <div class="cart-sub">${i.meta} · Qty ${i.qty}</div>
+        </div>
+        <div class="cart-sub" style="font-size:12.5px;color:var(--text)">₹${i.price*i.qty}</div>
+      </div>`).join('')}
+    <div class="section-label">Delivery address</div>
+    <div class="field"><label>Full name</label><input id="addrName" value="${state.address.name}" placeholder="Your name"/></div>
+    <div class="field"><label>Phone</label><input id="addrPhone" value="${state.address.phone}" placeholder="10-digit mobile"/></div>
+    <div class="field"><label>Address</label><textarea id="addrLine" rows="2" placeholder="House no, street, city, PIN">${state.address.line}</textarea></div>
+    <div class="section-label">Payment</div>
+    ${['UPI','Cash on Delivery','Card'].map(p=>`
+      <div class="pay-option ${state.payment===p?'active':''}" data-pay="${p}">
+        <span>${state.payment===p?'●':'○'}</span> ${p}
+      </div>`).join('')}
+    <div class="row-between"><span>Subtotal</span><span>₹${subtotal}</span></div>
+    <div class="row-between"><span>Delivery</span><span>${delivery===0?'Free':'₹'+delivery}</span></div>
+    <div class="row-between total"><span>Total</span><span>₹${subtotal+delivery}</span></div>
+    <button class="btn btn-block" id="placeOrder">Place order</button>`;
+}
+
+function screenOrders(){
+  if(state.orders.length===0) return `<div class="eyebrow">Orders</div><h1 class="page-title">No orders yet</h1>`;
+  const stages = ['Placed','Printing','Quality check','Delivered'];
+  return `
+    <div class="eyebrow">Orders</div>
+    <h1 class="page-title">Track & history</h1>
+    ${state.orders.map(o=>`
+      <div class="order-card">
+        <div class="order-card-top">
+          <span class="order-id">${o.id}</span>
+          <span class="status-badge ${o.status}">${o.status==='delivered'?'Delivered':'In progress'}</span>
+        </div>
+        <div style="font-size:12.5px; margin-top:6px; font-weight:600;">${o.item}</div>
+        <div class="cart-sub">Placed ${o.placed} · ₹${o.total}</div>
+        <div class="tracker">
+          <div class="stitch-track"><div class="stitch-fill" style="width:${(o.stage/3)*100}%"></div></div>
+          <div class="stitch-points">
+            ${stages.map((s,i)=>`
+              <div class="stitch-point">
+                <div class="stitch-dot ${i<=o.stage?'done':''}"></div>
+                <div class="stitch-point-label">${s}</div>
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>`).join('')}`;
+}
+
+function screenProfile(){
+  return `
+    <div class="eyebrow">Account</div>
+    <h1 class="page-title">Kavan's profile</h1>
+    <div class="stitch-divider"></div>
+    <div class="section-label">Girnar Cloth — owner account</div>
+    <p style="font-size:12.5px; color:var(--muted); line-height:1.6;">
+      This same login can switch between the customer storefront and the seller dashboard —
+      one app for shoppers, and one for running the business.
+    </p>
+    <button class="btn btn-block btn-ghost" id="toggleFromProfile">
+      Switch to ${state.view==='customer'?'Seller':'Customer'} view →
+    </button>
+    <div class="stitch-divider"></div>
+    <div class="section-label">Saved addresses</div>
+    <div class="cart-sub" style="font-size:12px;">${state.address.line || 'No address saved yet'}</div>`;
+}
+
+/* ---------- seller screens ---------- */
+function screenDashboard(){
+  const revenue = state.orders.reduce((s,o)=> s+o.total, 0);
+  const pending = state.orders.filter(o=> o.status==='progress').length;
+  const lowStock = state.inventory.filter(i=> i.qty <= i.low).length;
+  const byTech = {};
+  state.orders.forEach(o=>{ byTech[o.technique] = (byTech[o.technique]||0) + 1; });
+  const maxTech = Math.max(1, ...Object.values(byTech));
+  const bars = Object.keys(byTech).length ? Object.entries(byTech).map(([l,v])=>({l, v:(v/maxTech)*100})) : [{l:'No orders yet', v:0}];
+  return `
+    <div class="eyebrow">Business overview</div>
+    <h1 class="page-title">Live snapshot</h1>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-num">₹${revenue.toLocaleString('en-IN')}</div><div class="stat-label">Revenue, all orders</div></div>
+      <div class="stat-card"><div class="stat-num">${state.orders.length}</div><div class="stat-label">Total orders</div></div>
+      <div class="stat-card"><div class="stat-num">${pending}</div><div class="stat-label">Pending prints</div></div>
+      <div class="stat-card"><div class="stat-num">${lowStock}</div><div class="stat-label">Low stock items</div></div>
+    </div>
+    <div class="section-label">Orders by technique</div>
+    <div class="bar-chart">
+      ${bars.map(b=>`<div class="bar-col"><div class="bar" style="height:${Math.max(b.v,4)}%; background:var(--teal)"></div><div class="bar-col-label">${b.l}</div></div>`).join('')}
+    </div>`;
+}
+function screenInventory(){
+  return `
+    <div class="eyebrow">Stock room</div>
+    <h1 class="page-title">Inventory</h1>
+    <table class="mini"><thead><tr><th>Item</th><th>Stock</th><th>Status</th></tr></thead>
+    <tbody>${state.inventory.map(r=>`<tr><td>${r.name}</td><td>${r.qty}</td><td>${r.qty<=r.low?'Low':'OK'}</td></tr>`).join('')}</tbody></table>
+    <button class="btn btn-block" id="addStock">+ Add stock entry</button>`;
+}
+function screenSellerOrders(){
+  return `
+    <div class="eyebrow">Fulfilment</div>
+    <h1 class="page-title">Incoming orders</h1>
+    ${state.orders.length===0 ? '<div class="empty">No orders yet.</div>' : state.orders.map(o=>`
+      <div class="order-card" data-advance="${o.id}">
+        <div class="order-card-top"><span class="order-id">${o.id}</span><span class="status-badge ${o.status}">${o.status==='delivered'?'Delivered':'In progress'}</span></div>
+        <div style="font-size:12.5px; margin-top:6px; font-weight:600;">${o.item}</div>
+        <div class="cart-sub">₹${o.total} · ${o.placed}</div>
+        ${o.status!=='delivered' ? `<div class="cart-sub" style="margin-top:8px; color:var(--teal); font-weight:600;">Tap to move to next stage →</div>` : ''}
+      </div>`).join('')}`;
+}
+function screenCustomers(){
+  return `
+    <div class="eyebrow">Customers</div>
+    <h1 class="page-title">Customer database</h1>
+    <table class="mini"><thead><tr><th>Name</th><th>Orders</th><th>Spend</th></tr></thead>
+    <tbody>${state.customers.map(r=>`<tr><td>${r.name}</td><td>${r.orders}</td><td>₹${r.spend.toLocaleString('en-IN')}</td></tr>`).join('')}</tbody></table>`;
+}
+
+/* ---------------- wiring ---------------- */
+function wireScreen(){
+  screenEl.querySelectorAll('[data-cat]').forEach(el=> el.onclick = ()=>{ state.category=el.dataset.cat; render(); });
+  screenEl.querySelectorAll('[data-goto]').forEach(el=> el.onclick = ()=>{ state.tab=el.dataset.goto; render(); });
+
+  screenEl.querySelectorAll('[data-addcart]').forEach(el=> el.onclick = ()=>{
+    const p = products.find(x=>x.id==el.dataset.addcart);
+    state.cart.push({ name:p.name, meta:p.cat, price:p.price, color:p.color, artwork:null, qty:1 });
+    toast(`${p.name} added to cart`);
+    render();
+  });
+
+  screenEl.querySelectorAll('[data-garment]').forEach(el=> el.onclick=()=>{ state.design.garment=el.dataset.garment; render(); });
+  screenEl.querySelectorAll('[data-technique]').forEach(el=> el.onclick=()=>{ state.design.technique=el.dataset.technique; render(); });
+  screenEl.querySelectorAll('[data-color]').forEach(el=> el.onclick=()=>{ state.design.color=el.dataset.color; render(); });
+  screenEl.querySelectorAll('[data-size]').forEach(el=> el.onclick=()=>{ state.design.size=el.dataset.size; render(); });
+
+  const artInput = document.getElementById('artInput');
+  if(artInput) artInput.onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{ state.design.artwork = reader.result; render(); };
+    reader.readAsDataURL(file);
+  };
+
+  const addDesignBtn = document.getElementById('addDesignToCart');
+  if(addDesignBtn) addDesignBtn.onclick = ()=>{
+    const d = state.design;
+    const price = { DTF:120, Embroidery:220, Screen:90, Detail:280 }[d.technique] + {tee:250,hoodie:650,uniform:300}[d.garment];
+    state.cart.push({ name:`Custom ${d.garment} · ${d.technique}`, meta:`${d.size} · ${d.technique}`, price, color:d.color, artwork:d.artwork, qty:1 });
+    toast('Custom design added to cart');
+    state.tab='cart'; render();
+  };
+
+  const addrName = document.getElementById('addrName');
+  if(addrName){
+    addrName.oninput = e=> state.address.name = e.target.value;
+    document.getElementById('addrPhone').oninput = e=> state.address.phone = e.target.value;
+    document.getElementById('addrLine').oninput = e=> state.address.line = e.target.value;
+  }
+  screenEl.querySelectorAll('[data-pay]').forEach(el=> el.onclick = ()=>{ state.payment = el.dataset.pay; render(); });
+
+  const placeOrderBtn = document.getElementById('placeOrder');
+  if(placeOrderBtn) placeOrderBtn.onclick = ()=>{
+    if(state.cart.length===0) return;
+    const total = state.cart.reduce((s,i)=> s+i.price*i.qty, 0);
+    const id = 'VA-' + (1043 + state.orders.length);
+    const mainTechnique = state.cart[0].meta.match(/DTF|Embroidery|Screen|Detail/)?.[0] || 'DTF';
+    state.orders.unshift({ id, item: state.cart.map(i=>i.name).join(', '), status:'progress', stage:0, total, placed:'just now', technique:mainTechnique });
+
+    // consume matching stock, ties fulfilment to inventory
+    const stockMap = { DTF:'DTF Film Rolls', Embroidery:'Embroidery Thread — Gold', Screen:'White Cotton Fabric (m)', Detail:'DTF Film Rolls' };
+    const item = state.inventory.find(i=> i.name===stockMap[mainTechnique]);
+    if(item) item.qty = Math.max(0, item.qty - 1);
+
+    // update customer record from the address given
+    const custName = state.address.name.trim();
+    if(custName){
+      let cust = state.customers.find(c=> c.name.toLowerCase()===custName.toLowerCase());
+      if(!cust){ cust = { name:custName, orders:0, spend:0 }; state.customers.push(cust); }
+      cust.orders += 1; cust.spend += total;
+    }
+
+    state.cart = [];
+    toast('Order placed — tracking added');
+    state.tab='orders'; render();
+  };
+
+  const toggleFromProfile = document.getElementById('toggleFromProfile');
+  if(toggleFromProfile) toggleFromProfile.onclick = toggleView;
+
+  const addStockBtn = document.getElementById('addStock');
+  if(addStockBtn) addStockBtn.onclick = ()=>{
+    const name = prompt('Item name:');
+    if(!name) return;
+    const qty = parseInt(prompt('Quantity to add:', '10'), 10);
+    if(isNaN(qty)) return;
+    const existing = state.inventory.find(i=> i.name.toLowerCase()===name.toLowerCase());
+    if(existing) existing.qty += qty;
+    else state.inventory.push({ name, qty, low:5 });
+    toast('Stock updated');
+    render();
+  };
+
+  screenEl.querySelectorAll('[data-advance]').forEach(el=> el.onclick = ()=>{
+    const o = state.orders.find(x=> x.id===el.dataset.advance);
+    if(!o || o.status==='delivered') return;
+    o.stage = Math.min(3, o.stage+1);
+    if(o.stage===3) o.status='delivered';
+    toast(`${o.id} moved forward`);
+    render();
+  });
+}
+
+function toggleView(){
+  state.view = state.view==='customer' ? 'seller' : 'customer';
+  document.getElementById('viewToggle').textContent = state.view==='customer' ? '🧵 Customer view' : '📊 Seller view';
+  document.getElementById('viewToggle').classList.toggle('seller', state.view==='seller');
+  state.tab = state.view==='customer' ? 'home' : 'dashboard';
+  render();
+}
+document.getElementById('viewToggle').onclick = toggleView;
+
+render();
+
+// Makes the app installable ("Add to Home Screen"/"Install app") when hosted
+// over http(s) — e.g. on GitHub Pages, like the Girnar Cloth app. Skipped
+// automatically if opened as a local file, since browsers block service
+// workers on file:// for security reasons.
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
